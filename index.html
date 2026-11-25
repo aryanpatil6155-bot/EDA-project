@@ -1,0 +1,481 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>House Price Analysis Dashboard</title>
+
+<!-- Chart.js and CSV Parser -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #101713;
+    color: #e8eee9;
+    font-family: Arial, sans-serif;
+    padding: 35px 6%;
+}
+
+header {
+    margin-bottom: 28px;
+}
+
+.tag {
+    color: #a5d957;
+    font-size: 11px;
+    letter-spacing: 2px;
+    font-weight: bold;
+}
+
+h1 {
+    font-size: 36px;
+    margin: 14px 0 8px;
+}
+
+.subtitle {
+    color: #9aa79e;
+    font-size: 14px;
+}
+
+.notice {
+    background: #1a241b;
+    border: 1px solid #34452f;
+    padding: 16px;
+    border-radius: 10px;
+    margin: 25px 0;
+    color: #b6d79c;
+    font-size: 13px;
+}
+
+.metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+    margin-bottom: 30px;
+}
+
+.metric, .chart-card {
+    background: #19211c;
+    border: 1px solid #29372e;
+    border-radius: 13px;
+    padding: 22px;
+}
+
+.metric p {
+    color: #9aa79e;
+    font-size: 13px;
+}
+
+.metric h2 {
+    font-size: 29px;
+    margin-top: 14px;
+}
+
+.section-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 20px 0;
+    gap: 12px;
+}
+
+select {
+    background: #202b24;
+    color: white;
+    border: 1px solid #405045;
+    border-radius: 7px;
+    padding: 10px;
+}
+
+.charts {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+}
+
+.chart-card h3 {
+    margin: 12px 0 7px;
+    font-size: 17px;
+}
+
+.chart-card p {
+    color: #89968d;
+    font-size: 12px;
+    margin-bottom: 20px;
+}
+
+.chart-box {
+    height: 280px;
+    position: relative;
+}
+
+footer {
+    margin-top: 35px;
+    text-align: center;
+    color: #89968d;
+    font-size: 12px;
+}
+
+@media(max-width: 750px) {
+    body { padding: 22px 4%; }
+    .metrics { grid-template-columns: 1fr; }
+    .charts { grid-template-columns: 1fr; }
+    h1 { font-size: 28px; }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+    <div class="tag">HOUSING MARKET · EXPLORATORY ANALYSIS</div>
+    <h1>House Price Analysis</h1>
+    <p class="subtitle">
+        A closer look at what shapes home values across the Ames market.
+    </p>
+</header>
+
+<div class="notice" id="status">
+    Loading Ames Housing Dataset...
+</div>
+
+<section class="metrics">
+    <div class="metric">
+        <p>Mean sale price</p>
+        <h2 id="mean">$--</h2>
+    </div>
+
+    <div class="metric">
+        <p>Median sale price</p>
+        <h2 id="median">$--</h2>
+    </div>
+
+    <div class="metric">
+        <p>Houses analysed</p>
+        <h2 id="count">--</h2>
+    </div>
+</section>
+
+<div class="section-heading">
+    <div>
+        <h2>Market overview</h2>
+        <p class="subtitle">Explore house prices and property features.</p>
+    </div>
+
+    <select id="yearFilter">
+        <option value="0">All build years</option>
+        <option value="1950">1950 and newer</option>
+        <option value="2000">2000 and newer</option>
+    </select>
+</div>
+
+<section class="charts">
+
+    <div class="chart-card">
+        <div class="tag">PRICE TRENDS</div>
+        <h3>Average price by year built</h3>
+        <p>How average sale prices vary by construction year.</p>
+        <div class="chart-box">
+            <canvas id="yearChart"></canvas>
+        </div>
+    </div>
+
+    <div class="chart-card">
+        <div class="tag">LOCAL PERSPECTIVE</div>
+        <h3>Top 10 neighbourhoods</h3>
+        <p>Ranked by average sale price.</p>
+        <div class="chart-box">
+            <canvas id="neighborhoodChart"></canvas>
+        </div>
+    </div>
+
+    <div class="chart-card">
+        <div class="tag">PRICE DISTRIBUTION</div>
+        <h3>Sale price distribution</h3>
+        <p>Frequency of house sale prices.</p>
+        <div class="chart-box">
+            <canvas id="priceChart"></canvas>
+        </div>
+    </div>
+
+    <div class="chart-card">
+        <div class="tag">PROPERTY FEATURES</div>
+        <h3>Living area vs sale price</h3>
+        <p>Compare house size and sale price.</p>
+        <div class="chart-box">
+            <canvas id="areaChart"></canvas>
+        </div>
+    </div>
+
+</section>
+
+<footer>
+    Exploratory Data Analysis | Ames Housing Dataset | Python Project
+</footer>
+
+<script>
+let houses = [];
+let charts = {};
+
+const money = n =>
+    "$" + Math.round(n).toLocaleString("en-US");
+
+function average(values) {
+    return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+function median(values) {
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+
+    return sorted.length % 2
+        ? sorted[mid]
+        : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function drawChart(id, type, labels, values, label, color) {
+    if (charts[id]) charts[id].destroy();
+
+    charts[id] = new Chart(
+        document.getElementById(id), {
+            type: type,
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: label,
+                    data: values,
+                    backgroundColor: color,
+                    borderColor: color,
+                    borderWidth: 2,
+                    borderRadius: 4,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: { color: "#c4d0c6" }
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: "#9aa79e" },
+                        grid: { color: "#29372e" }
+                    },
+                    y: {
+                        ticks: { color: "#9aa79e" },
+                        grid: { color: "#29372e" }
+                    }
+                }
+            }
+        }
+    );
+}
+
+function updateDashboard() {
+
+    const minYear =
+        Number(document.getElementById("yearFilter").value);
+
+    const data = houses.filter(
+        h => h.YearBuilt >= minYear
+    );
+
+    if (!data.length) return;
+
+    const prices = data.map(h => h.SalePrice);
+
+    document.getElementById("mean").textContent =
+        money(average(prices));
+
+    document.getElementById("median").textContent =
+        money(median(prices));
+
+    document.getElementById("count").textContent =
+        data.length.toLocaleString();
+
+    // 1. Average price by year built
+
+    const yearGroups = {};
+
+    data.forEach(h => {
+        yearGroups[h.YearBuilt] ??= [];
+        yearGroups[h.YearBuilt].push(h.SalePrice);
+    });
+
+    const years = Object.keys(yearGroups)
+        .sort((a, b) => Number(a) - Number(b));
+
+    drawChart(
+        "yearChart",
+        "line",
+        years,
+        years.map(y => average(yearGroups[y])),
+        "Average sale price",
+        "#72c6a5"
+    );
+
+    // 2. Top 10 neighbourhoods
+
+    const groups = {};
+
+    data.forEach(h => {
+        groups[h.Neighborhood] ??= [];
+        groups[h.Neighborhood].push(h.SalePrice);
+    });
+
+    const top = Object.entries(groups)
+        .map(([name, values]) => [name, average(values)])
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .reverse();
+
+    drawChart(
+        "neighborhoodChart",
+        "bar",
+        top.map(x => x[0]),
+        top.map(x => x[1]),
+        "Average price",
+        "#a5d957"
+    );
+
+    // 3. Sale price distribution
+
+    const bins = Array(10).fill(0);
+    const labels = [];
+
+    for (let i = 0; i < 10; i++) {
+        const low = i * 50000;
+        const high = (i + 1) * 50000;
+
+        labels.push(
+            "$" + low / 1000 + "k–" + high / 1000 + "k"
+        );
+
+        bins[i] = prices.filter(
+            p => p >= low && p < high
+        ).length;
+    }
+
+    drawChart(
+        "priceChart",
+        "bar",
+        labels,
+        bins,
+        "Number of houses",
+        "#72c6a5"
+    );
+
+    // 4. Living area vs sale price
+
+    if (charts.areaChart) {
+        charts.areaChart.destroy();
+    }
+
+    const scatter = data
+        .filter(h => h.GrLivArea > 0)
+        .map(h => ({
+            x: h.GrLivArea,
+            y: h.SalePrice
+        }));
+
+    charts.areaChart = new Chart(
+        document.getElementById("areaChart"), {
+            type: "scatter",
+            data: {
+                datasets: [{
+                    label: "Houses",
+                    data: scatter,
+                    backgroundColor: "#a5d957",
+                    pointRadius: 3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: { color: "#c4d0c6" }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: "Living area (sq ft)",
+                            color: "#9aa79e"
+                        },
+                        ticks: { color: "#9aa79e" },
+                        grid: { color: "#29372e" }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: "Sale price ($)",
+                            color: "#9aa79e"
+                        },
+                        ticks: { color: "#9aa79e" },
+                        grid: { color: "#29372e" }
+                    }
+                }
+            }
+        }
+    );
+
+    document.getElementById("status").textContent =
+        "Original dataset loaded. Results calculated from " +
+        data.length.toLocaleString() +
+        " valid records in train.csv.";
+}
+
+// Load the actual dataset
+
+Papa.parse("train.csv", {
+    download: true,
+    header: true,
+    dynamicTyping: true,
+    skipEmptyLines: true,
+
+    complete: function(results) {
+
+        houses = results.data.filter(h =>
+            Number.isFinite(h.SalePrice) &&
+            Number.isFinite(h.YearBuilt) &&
+            Number.isFinite(h.GrLivArea) &&
+            h.Neighborhood
+        );
+
+        if (!houses.length) {
+            document.getElementById("status").textContent =
+                "Dataset loaded, but required columns were not found.";
+            return;
+        }
+
+        updateDashboard();
+    },
+
+    error: function() {
+        document.getElementById("status").textContent =
+            "Could not load train.csv. Check your GitHub files.";
+    }
+});
+
+document.getElementById("yearFilter").addEventListener(
+    "change",
+    updateDashboard
+);
+
+</script>
+
+</body>
+</html>
